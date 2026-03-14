@@ -17,3 +17,4 @@ If you are developing a production application, we recommend using TypeScript wi
 trigger deploy
 trigger deploy 2
 trigger deploy 3
+trigger deploy 4
