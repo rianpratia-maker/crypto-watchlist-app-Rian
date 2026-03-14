@@ -18,6 +18,11 @@ const DEFAULT_RISK = {
   stopAltPct: 6
 }
 
+const SOURCE_MAP = {
+  coindesk: 'CoinDesk',
+  cointelegraph: 'Cointelegraph'
+}
+
 function formatIDR(value, digits = 0) {
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
@@ -40,7 +45,18 @@ function App() {
   const [risk, setRisk] = useState(DEFAULT_RISK)
   const [search, setSearch] = useState('')
   const [lastUpdatedMs, setLastUpdatedMs] = useState(0)
-  const [topCoins, setTopCoins] = useState([])
+  const [topCoins, setTopCoins] = useState([
+    { id: 'bitcoin', name: 'Bitcoin', symbol: 'BTC' },
+    { id: 'ethereum', name: 'Ethereum', symbol: 'ETH' },
+    { id: 'tether', name: 'Tether', symbol: 'USDT' },
+    { id: 'bnb', name: 'BNB', symbol: 'BNB' },
+    { id: 'xrp', name: 'XRP', symbol: 'XRP' },
+    { id: 'usd-coin', name: 'USD Coin', symbol: 'USDC' },
+    { id: 'solana', name: 'Solana', symbol: 'SOL' },
+    { id: 'tron', name: 'TRON', symbol: 'TRX' },
+    { id: 'dogecoin', name: 'Dogecoin', symbol: 'DOGE' },
+    { id: 'cardano', name: 'Cardano', symbol: 'ADA' }
+  ])
   const [expandedCoin, setExpandedCoin] = useState('')
   const [newsByCoin, setNewsByCoin] = useState({})
   const [newsLoading, setNewsLoading] = useState({})
@@ -48,14 +64,44 @@ function App() {
   const [newsLimit, setNewsLimit] = useState(5)
   const [newsSort, setNewsSort] = useState('newest')
   const [newsSourceFilter, setNewsSourceFilter] = useState('all')
+  const [showAllNewsCoins, setShowAllNewsCoins] = useState(false)
+  const [logoBySymbol, setLogoBySymbol] = useState({})
+  const [priceHistory, setPriceHistory] = useState({})
+  const [expandedPair, setExpandedPair] = useState('')
+  const [liveIntervalMs, setLiveIntervalMs] = useState(30_000)
 
   const intervalMs = 2 * 60 * 60 * 1000
   const newsCacheMs = 30 * 60 * 1000
-  const gnewsKey = import.meta.env.VITE_GNEWS_API_KEY
+  const liveIntervals = [
+    { label: '10s', value: 10_000 },
+    { label: '15s', value: 15_000 },
+    { label: '30s', value: 30_000 },
+    { label: '60s', value: 60_000 }
+  ]
 
-  const fetchTickers = async () => {
-    setLoading(true)
-    setError('')
+  const getLogoForSymbol = (symbol) => {
+    const key = String(symbol || '').toLowerCase()
+    if (!key) return ''
+    return (
+      logoBySymbol[key] ||
+      `https://cdn.jsdelivr.net/gh/atomiclabs/cryptocurrency-icons@main/128/color/${key}.png`
+    )
+  }
+
+  const fetchLogoMap = async () => {
+    try {
+      const res = await fetch('/api/pairs')
+      if (!res.ok) return
+      const data = await res.json()
+      if (data && data.symbols) setLogoBySymbol(data.symbols)
+    } catch {
+      // non-blocking
+    }
+  }
+
+  const fetchTickers = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true)
+    if (!silent) setError('')
     try {
       const res = await fetch('/api/tickers')
       if (!res.ok) throw new Error('Gagal memuat data Indodax')
@@ -82,15 +128,27 @@ function App() {
         setLastUpdatedMs(ts)
       }
       setTickers(rows)
+      setPriceHistory((prev) => {
+        const next = { ...prev }
+        for (const row of rows) {
+          const key = row.pair
+          const series = Array.isArray(next[key]) ? [...next[key]] : []
+          if (Number.isFinite(row.last)) series.push(row.last)
+          if (series.length > 30) series.splice(0, series.length - 30)
+          next[key] = series
+        }
+        return next
+      })
     } catch (err) {
-      setError(err.message || 'Terjadi kesalahan')
+      if (!silent) setError(err.message || 'Terjadi kesalahan')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     fetchTickers()
+    fetchLogoMap()
   }, [])
 
   useEffect(() => {
@@ -99,25 +157,48 @@ function App() {
   }, [intervalMs])
 
   useEffect(() => {
-    const loadTopCoins = async () => {
-      try {
-        const res = await fetch(
-          'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=10&page=1&sparkline=false'
-        )
-        if (!res.ok) throw new Error('Gagal memuat Top 10 coins')
-        const data = await res.json()
-        const coins = (data || []).map((c) => ({
-          id: c.id,
-          name: c.name,
-          symbol: String(c.symbol || '').toUpperCase()
-        }))
-        setTopCoins(coins)
-      } catch (err) {
-        setTopCoins([])
-      }
-    }
-    loadTopCoins()
+    if (!expandedPair) return
+    const id = setInterval(() => fetchTickers({ silent: true }), liveIntervalMs)
+    return () => clearInterval(id)
+  }, [expandedPair, liveIntervalMs])
+
+  useEffect(() => {
+    // Keep static Top 10 list to avoid CORS/rate-limit issues in production.
+    setTopCoins((prev) => (prev.length ? prev : []))
   }, [])
+
+  const sparklinePoints = (values, width = 120, height = 36, padding = 4) => {
+    const cleaned = Array.isArray(values)
+      ? values.map((v) => Number(v)).filter((v) => Number.isFinite(v))
+      : []
+    if (cleaned.length < 2) {
+      const mid = height / 2
+      return `${padding},${mid} ${width - padding},${mid}`
+    }
+    const min = Math.min(...cleaned)
+    const max = Math.max(...cleaned)
+    const range = max - min || 1
+    return cleaned
+      .map((v, i) => {
+        const x = padding + (i / (cleaned.length - 1)) * (width - padding * 2)
+        const y = padding + (1 - (v - min) / range) * (height - padding * 2)
+        return `${x.toFixed(2)},${y.toFixed(2)}`
+      })
+      .join(' ')
+  }
+
+  const getDisplaySeries = (t) => {
+    const history = priceHistory[t.pair] || []
+    if (history.length >= 2) return history
+    const low = Number(t.low || 0)
+    const high = Number(t.high || 0)
+    const last = Number(t.last || 0)
+    if (low > 0 && high > 0) {
+      return [low, last || low, high].filter((v) => Number.isFinite(v))
+    }
+    if (last > 0) return [last, last * 1.0001]
+    return []
+  }
 
   const watchlist = useMemo(() => {
     const filtered = tickers.filter((t) => !STABLE_PAIRS.has(t.pair))
@@ -136,6 +217,19 @@ function App() {
     () => new Set(watchlist.map((t) => t.pair)),
     [watchlist]
   )
+  const watchlistSymbols = useMemo(
+    () => new Set(watchlist.map((t) => t.pair.split('_')[0])),
+    [watchlist]
+  )
+
+  const newsCoins = useMemo(() => {
+    if (showAllNewsCoins) return topCoins
+    if (watchlistSymbols.size === 0) return topCoins
+    const filtered = topCoins.filter((c) =>
+      watchlistSymbols.has(String(c.symbol || '').toLowerCase())
+    )
+    return filtered.length > 0 ? filtered : topCoins
+  }, [topCoins, watchlistSymbols, showAllNewsCoins])
 
   const filteredTable = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -149,42 +243,31 @@ function App() {
   const nextRefresh = lastUpdatedMs ? new Date(lastUpdatedMs + intervalMs) : null
 
   const fetchNewsForCoin = async (coin) => {
-    if (!gnewsKey) {
-      setNewsError((prev) => ({
-        ...prev,
-        [coin.id]: 'API key GNews belum diatur.'
-      }))
-      return
-    }
     const cached = newsByCoin[coin.id]
     if (cached && Date.now() - cached.fetchedAt < newsCacheMs) return
     setNewsLoading((prev) => ({ ...prev, [coin.id]: true }))
     setNewsError((prev) => ({ ...prev, [coin.id]: '' }))
     try {
-      const q = `${coin.name} OR ${coin.symbol} crypto`
-      const url = `https://gnews.io/api/v4/search?q=${encodeURIComponent(
-        q
-      )}&lang=id&max=${newsLimit}&token=${gnewsKey}`
-      const res = await fetch(url)
+      const params = new URLSearchParams({
+        symbol: coin.symbol,
+        assetId: coin.id,
+        q: coin.name,
+        lang: 'id',
+        max: String(newsLimit),
+        merge: '1',
+        source: newsSourceFilter
+      })
+      const res = await fetch(`/api/news?${params.toString()}`)
       if (!res.ok) throw new Error('Gagal memuat news')
       const data = await res.json()
-      const keywordRegex = /\b(price|harga|etf|price action|market|naik|turun|rally|dump|pump)\b/i
-      const sourceMap = {
-        coindesk: 'CoinDesk',
-        cnbcindonesia: 'CNBC Indonesia'
+      if ((data.items || []).length === 0 && (data.errors || []).length > 0) {
+        setNewsError((prev) => ({
+          ...prev,
+          [coin.id]: data.errors[0]
+        }))
       }
-      const sourceKey = newsSourceFilter
-      const filtered = (data.articles || []).filter((item) => {
-        const haystack = `${item.title || ''} ${item.description || ''}`
-        if (!keywordRegex.test(haystack)) return false
-        if (sourceKey === 'all') return true
-        const sourceName = String(item.source?.name || '').toLowerCase()
-        if (sourceKey === 'coindesk') return sourceName.includes('coindesk')
-        if (sourceKey === 'cnbcindonesia')
-          return sourceName.includes('cnbc indonesia') || sourceName.includes('cnbcindonesia')
-        return true
-      })
-      const sorted = filtered.sort((a, b) => {
+      const items = data.items || []
+      const sorted = items.sort((a, b) => {
         const ad = new Date(a.publishedAt || 0).getTime()
         const bd = new Date(b.publishedAt || 0).getTime()
         return newsSort === 'newest' ? bd - ad : ad - bd
@@ -193,7 +276,8 @@ function App() {
         ...prev,
         [coin.id]: {
           fetchedAt: Date.now(),
-          items: sorted.slice(0, newsLimit)
+          items: sorted.slice(0, newsLimit),
+          lang: data.lang || 'id'
         }
       }))
     } catch (err) {
@@ -208,6 +292,26 @@ function App() {
 
   return (
     <div className="app">
+      <div className="top-bar">
+        <div className="top-bar-inner">
+          <span className="label">Realtime interval</span>
+          <div className="top-bar-controls">
+            <select
+              value={liveIntervalMs}
+              onChange={(e) => setLiveIntervalMs(Number(e.target.value))}
+            >
+              {liveIntervals.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <span className="muted tiny">
+              Berlaku untuk chart koin yang sedang dibuka.
+            </span>
+          </div>
+        </div>
+      </div>
       <header className="hero">
         <div className="hero-text">
           <p className="eyebrow">Indodax Spot</p>
@@ -253,7 +357,24 @@ function App() {
               <div className="recommend-card" key={t.pair}>
                 <div>
                   <p className="label">Rekomendasi #{idx + 1}</p>
-                  <p className="value">{t.pair}</p>
+                  <p className="value with-logo">
+                    <span className="coin-badge small">
+                      <img
+                        className="coin-logo"
+                        src={getLogoForSymbol(t.pair.split('_')[0])}
+                        alt={`${t.pair.split('_')[0].toUpperCase()} logo`}
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none'
+                          const fallback = e.currentTarget.nextSibling
+                          if (fallback) fallback.style.display = 'grid'
+                        }}
+                      />
+                      <span className="coin-fallback">
+                        {t.pair.split('_')[0].toUpperCase()}
+                      </span>
+                    </span>
+                    {t.pair}
+                  </p>
                 </div>
                 <div className="reason">
                   <span>Vol {formatNumber(t.vol / 1_000_000_000, 2)}B</span>
@@ -276,43 +397,105 @@ function App() {
             </div>
           )}
         </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Pair</th>
-                <th>Last (IDR)</th>
-                <th>Vol IDR</th>
-                <th>Range %</th>
-                <th>Tag</th>
-              </tr>
-            </thead>
-            <tbody>
-              {watchlist.length > 0 ? (
-                watchlist.map((t) => (
-                  <tr key={t.pair}>
-                    <td className="pair">{t.pair}</td>
-                    <td>{formatIDR(t.last, t.last < 1 ? 6 : 0)}</td>
-                    <td>{formatNumber(t.vol / 1_000_000_000, 2)}B</td>
-                    <td>{formatNumber(t.rangePct, 2)}%</td>
-                    <td>
-                      <span
-                        className={`chip ${t.rangePct > 15 ? 'hot' : 'cool'}`}
-                      >
-                        {t.rangePct > 15 ? 'High Vol' : 'Liquid'}
+        <div className="coin-stream list">
+          {watchlist.length > 0 ? (
+            watchlist.map((t) => {
+              const history = priceHistory[t.pair] || []
+              const series = getDisplaySeries(t)
+              const prev = history.length > 1 ? history[history.length - 2] : null
+              const change = prev ? t.last - prev : 0
+              const changePct = prev ? (change / prev) * 100 : 0
+              const isUp = change >= 0
+              const sparkClass = series.length > 1 ? (isUp ? 'up' : 'down') : 'flat'
+              const base = t.pair.split('_')[0].toUpperCase()
+              const quote = t.pair.split('_')[1]?.toUpperCase() || 'IDR'
+              const isOpen = expandedPair === t.pair
+              const detailSeries = priceHistory[t.pair] || series
+              return (
+                <div className="coin-row list" key={t.pair}>
+                  <button
+                    type="button"
+                    className="coin-card-btn"
+                    onClick={() => setExpandedPair(isOpen ? '' : t.pair)}
+                    aria-expanded={isOpen}
+                  >
+                    <div className="coin-left">
+                      <span className="coin-badge">
+                        <img
+                          className="coin-logo"
+                          src={getLogoForSymbol(t.pair.split('_')[0])}
+                          alt={`${base} logo`}
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none'
+                            const fallback = e.currentTarget.nextSibling
+                            if (fallback) fallback.style.display = 'grid'
+                          }}
+                        />
+                        <span className="coin-fallback">{base}</span>
                       </span>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={5}>
-                    {loading ? 'Memuat data...' : 'Belum ada data watchlist.'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                      <div>
+                        <p className="coin-symbol">{base}</p>
+                        <p className="muted tiny">
+                          Pair {base}/{quote} · Vol{' '}
+                          {formatNumber(t.vol / 1_000_000_000, 2)}B · Range{' '}
+                          {formatNumber(t.rangePct, 2)}%
+                        </p>
+                      </div>
+                    </div>
+                    <div className="coin-middle">
+                      <svg
+                        className="sparkline"
+                        viewBox="0 0 120 36"
+                        preserveAspectRatio="none"
+                      >
+                        <polyline
+                          points={sparklinePoints(series)}
+                          className={sparkClass}
+                          stroke={sparkClass === 'down' ? '#ef4444' : sparkClass === 'up' ? '#16a34a' : 'rgba(15, 23, 42, 0.45)'}
+                          fill="none"
+                        />
+                      </svg>
+                    </div>
+                    <div className="coin-right">
+                      <p className="price">{formatIDR(t.last, t.last < 1 ? 6 : 0)}</p>
+                      <p className={`change ${isUp ? 'up' : 'down'}`}>
+                        {prev ? `${change >= 0 ? '+' : ''}${formatIDR(change, 0)}` : '—'}{' '}
+                        {prev
+                          ? `(${changePct >= 0 ? '+' : ''}${formatNumber(changePct, 2)}%)`
+                          : ''}
+                      </p>
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div className="coin-detail">
+                      <div className="coin-detail-head">
+                        <span className="muted tiny">
+                          Realtime chart ({Math.round(liveIntervalMs / 1000)}s)
+                        </span>
+                        <span className="muted tiny">Update {snapshot || '—'}</span>
+                      </div>
+                      <svg
+                        className="sparkline large"
+                        viewBox="0 0 320 96"
+                        preserveAspectRatio="none"
+                      >
+                        <polyline
+                          points={sparklinePoints(detailSeries, 320, 96, 6)}
+                          className={sparkClass}
+                          stroke={sparkClass === 'down' ? '#ef4444' : sparkClass === 'up' ? '#16a34a' : 'rgba(15, 23, 42, 0.45)'}
+                          fill="none"
+                        />
+                      </svg>
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          ) : (
+            <div className="coin-row empty">
+              {loading ? 'Memuat data...' : 'Belum ada data watchlist.'}
+            </div>
+          )}
         </div>
       </section>
 
@@ -430,46 +613,114 @@ function App() {
             />
             <span>{filteredTable.length} pair</span>
           </div>
-          <div className="table-wrap compact">
-            <table>
-              <thead>
-                <tr>
-                  <th>Pair</th>
-                  <th>Last</th>
-                  <th>Vol IDR</th>
-                  <th>Range %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTable.length > 0 ? (
-                  filteredTable.map((t) => (
-                    <tr
-                      key={t.pair}
-                      className={watchlistPairs.has(t.pair) ? 'highlight' : ''}
+          <div className="coin-stream cards">
+            {filteredTable.length > 0 ? (
+              filteredTable.map((t) => {
+                const history = priceHistory[t.pair] || []
+                const series = getDisplaySeries(t)
+                const prev = history.length > 1 ? history[history.length - 2] : null
+                const change = prev ? t.last - prev : 0
+                const changePct = prev ? (change / prev) * 100 : 0
+                const isUp = change >= 0
+                const sparkClass = series.length > 1 ? (isUp ? 'up' : 'down') : 'flat'
+                const base = t.pair.split('_')[0].toUpperCase()
+                const quote = t.pair.split('_')[1]?.toUpperCase() || 'IDR'
+                const isOpen = expandedPair === t.pair
+                const detailSeries = priceHistory[t.pair] || series
+                return (
+                  <div
+                    key={t.pair}
+                    className={`coin-row card ${watchlistPairs.has(t.pair) ? 'highlight' : ''}`}
+                  >
+                    <button
+                      type="button"
+                      className="coin-card-btn"
+                      onClick={() => setExpandedPair(isOpen ? '' : t.pair)}
+                      aria-expanded={isOpen}
                     >
-                      <td className="pair">{t.pair}</td>
-                      <td>{formatIDR(t.last, t.last < 1 ? 6 : 0)}</td>
-                      <td>{formatNumber(t.vol / 1_000_000_000, 2)}B</td>
-                      <td>{formatNumber(t.rangePct, 2)}%</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={4}>
-                      {loading ? 'Memuat data...' : 'Tidak ada pair yang cocok.'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                      <div className="coin-left">
+                        <span className="coin-badge">
+                          <img
+                            className="coin-logo"
+                            src={getLogoForSymbol(t.pair.split('_')[0])}
+                            alt={`${base} logo`}
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none'
+                              const fallback = e.currentTarget.nextSibling
+                              if (fallback) fallback.style.display = 'grid'
+                            }}
+                          />
+                          <span className="coin-fallback">{base}</span>
+                        </span>
+                        <div>
+                          <p className="coin-symbol">{t.pair.toUpperCase()}</p>
+                          <p className="muted tiny">
+                            Vol {formatNumber(t.vol / 1_000_000_000, 2)}B · Range{' '}
+                            {formatNumber(t.rangePct, 2)}% · {base}/{quote}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="coin-middle card">
+                      <svg
+                        className="sparkline"
+                        viewBox="0 0 120 36"
+                        preserveAspectRatio="none"
+                      >
+                        <polyline
+                          points={sparklinePoints(series)}
+                          className={sparkClass}
+                          stroke={sparkClass === 'down' ? '#ef4444' : sparkClass === 'up' ? '#16a34a' : 'rgba(15, 23, 42, 0.45)'}
+                          fill="none"
+                        />
+                      </svg>
+                      </div>
+                      <div className="coin-right card">
+                        <p className="price">{formatIDR(t.last, t.last < 1 ? 6 : 0)}</p>
+                        <p className={`change ${isUp ? 'up' : 'down'}`}>
+                          {prev ? `${change >= 0 ? '+' : ''}${formatIDR(change, 0)}` : '—'}{' '}
+                          {prev
+                            ? `(${changePct >= 0 ? '+' : ''}${formatNumber(changePct, 2)}%)`
+                            : ''}
+                        </p>
+                      </div>
+                    </button>
+                    {isOpen && (
+                      <div className="coin-detail">
+                        <div className="coin-detail-head">
+                          <span className="muted tiny">Realtime chart (30s)</span>
+                          <span className="muted tiny">
+                            Update {snapshot || '—'}
+                          </span>
+                        </div>
+                        <svg
+                          className="sparkline large"
+                          viewBox="0 0 320 96"
+                          preserveAspectRatio="none"
+                        >
+                          <polyline
+                            points={sparklinePoints(detailSeries, 320, 96, 6)}
+                            className={sparkClass}
+                            fill="none"
+                          />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            ) : (
+              <div className="coin-row empty">
+                {loading ? 'Memuat data...' : 'Tidak ada pair yang cocok.'}
+              </div>
+            )}
           </div>
         </div>
       </section>
 
       <section className="section">
         <div className="section-head">
-          <h2>News per Coin (Top 10)</h2>
-          <p>Berita terbaru per koin (GNews, bahasa Indonesia).</p>
+          <h2>News sesuai Top Watchlist</h2>
+          <p>Berita terbaru untuk koin yang masuk Top Watchlist.</p>
         </div>
         <div className="news-controls">
           <label>
@@ -512,16 +763,28 @@ function App() {
               }}
             >
               <option value="all">Semua</option>
-              <option value="coindesk">{sourceMap.coindesk}</option>
-              <option value="cnbcindonesia">{sourceMap.cnbcindonesia}</option>
+              <option value="coindesk">{SOURCE_MAP.coindesk}</option>
+              <option value="cointelegraph">{SOURCE_MAP.cointelegraph}</option>
+            </select>
+          </label>
+          <label>
+            Cakupan
+            <select
+              value={showAllNewsCoins ? 'all' : 'watchlist'}
+              onChange={(e) => setShowAllNewsCoins(e.target.value === 'all')}
+            >
+              <option value="watchlist">Top Watchlist</option>
+              <option value="all">Semua Top 10</option>
             </select>
           </label>
         </div>
         <div className="news-list">
-          {topCoins.length > 0 ? (
-            topCoins.map((coin) => {
+          {newsCoins.length > 0 ? (
+            newsCoins.map((coin) => {
               const isOpen = expandedCoin === coin.id
               const news = newsByCoin[coin.id]?.items || []
+              const newsLang = newsByCoin[coin.id]?.lang
+              const symbolLower = String(coin.symbol || '').toLowerCase()
               return (
                 <div className="news-card" key={coin.id}>
                   <button
@@ -532,7 +795,20 @@ function App() {
                       if (!isOpen) fetchNewsForCoin(coin)
                     }}
                   >
-                    <span>
+                    <span className="coin-title">
+                      <span className="coin-badge">
+                        <img
+                          className="coin-logo"
+                          src={getLogoForSymbol(symbolLower)}
+                          alt={`${coin.symbol} logo`}
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none'
+                            const fallback = e.currentTarget.nextSibling
+                            if (fallback) fallback.style.display = 'grid'
+                          }}
+                        />
+                        <span className="coin-fallback">{coin.symbol}</span>
+                      </span>
                       {coin.name} ({coin.symbol})
                     </span>
                     <span>{isOpen ? '−' : '+'}</span>
@@ -548,23 +824,23 @@ function App() {
                       {!newsLoading[coin.id] && !newsError[coin.id] && news.length === 0 && (
                         <p className="muted">Belum ada berita relevan.</p>
                       )}
+                      {!newsLoading[coin.id] && !newsError[coin.id] && newsLang === 'en' && (
+                        <p className="muted tiny">Berita diambil dari sumber internasional.</p>
+                      )}
                       {news.length > 0 && (
                         <ul className="news-items">
                           {news.map((item) => (
                             <li key={item.url}>
                               <a href={item.url} target="_blank" rel="noreferrer">
-                                {item.title}
+                                {item.translated?.title || item.title}
                               </a>
                               <span className="news-meta">
                                 {(() => {
-                                  const name = String(item.source?.name || '')
+                                  const name = String(item.source?.name || item.source || '')
                                   if (name.toLowerCase().includes('coindesk'))
-                                    return sourceMap.coindesk
-                                  if (
-                                    name.toLowerCase().includes('cnbc indonesia') ||
-                                    name.toLowerCase().includes('cnbcindonesia')
-                                  )
-                                    return sourceMap.cnbcindonesia
+                                    return SOURCE_MAP.coindesk
+                                  if (name.toLowerCase().includes('cointelegraph'))
+                                    return SOURCE_MAP.cointelegraph
                                   return name || 'Sumber'
                                 })()}{' '}
                                 ·{' '}
@@ -572,6 +848,9 @@ function App() {
                                   ? new Date(item.publishedAt).toLocaleString('id-ID')
                                   : '—'}
                               </span>
+                              {item.translated?.title && (
+                                <span className="news-meta">Terjemahan otomatis</span>
+                              )}
                             </li>
                           ))}
                         </ul>
@@ -583,7 +862,7 @@ function App() {
             })
           ) : (
             <div className="news-card">
-              <p className="muted">Memuat daftar Top 10 coin...</p>
+              <p className="muted">Belum ada coin yang cocok dengan Top Watchlist.</p>
             </div>
           )}
         </div>
