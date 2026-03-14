@@ -270,7 +270,7 @@ function App() {
   const getTradingViewSymbol = (pair) => {
     const base = String(pair || '').split('_')[0]?.toUpperCase()
     if (!base) return ''
-    return `COINBASE:${base}USD`
+    return `BINANCE:${base}USDT`
   }
 
   const getTradingViewInterval = (ms) => {
