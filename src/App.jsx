@@ -68,7 +68,9 @@ function App() {
   const [logoBySymbol, setLogoBySymbol] = useState({})
   const [priceHistory, setPriceHistory] = useState({})
   const [expandedPair, setExpandedPair] = useState('')
-  const [liveIntervalMs, setLiveIntervalMs] = useState(30_000)
+  const [liveIntervalMs, setLiveIntervalMs] = useState(60 * 60_000)
+  const [pairsPerPage, setPairsPerPage] = useState(12)
+  const [pairsPage, setPairsPage] = useState(1)
 
   const intervalMs = 2 * 60 * 60 * 1000
   const newsCacheMs = 30 * 60 * 1000
@@ -76,7 +78,9 @@ function App() {
     { label: '10s', value: 10_000 },
     { label: '15s', value: 15_000 },
     { label: '30s', value: 30_000 },
-    { label: '60s', value: 60_000 }
+    { label: '60s', value: 60_000 },
+    { label: '15m', value: 15 * 60_000 },
+    { label: '1h', value: 60 * 60_000 }
   ]
 
   const getLogoForSymbol = (symbol) => {
@@ -187,17 +191,91 @@ function App() {
       .join(' ')
   }
 
+  const hashSeed = (text) => {
+    let hash = 0
+    for (let i = 0; i < text.length; i += 1) {
+      hash = (hash * 31 + text.charCodeAt(i)) % 1_000_000
+    }
+    return hash / 1_000_000
+  }
+
+  const buildSyntheticSeries = (t, points = 60) => {
+    const low = Number(t.low || 0)
+    const high = Number(t.high || 0)
+    const last = Number(t.last || 0)
+    const seed = hashSeed(t.pair || '') || 0.123
+    const jitter = (i, base) =>
+      base * (1 + Math.sin((i + seed * 10) * 1.7) * 0.002)
+
+    if (low > 0 && high > 0) {
+      const split = Math.max(2, Math.floor(points * 0.55))
+      const series = []
+      for (let i = 0; i < points; i += 1) {
+        let v = 0
+        if (i < split) {
+          const tUp = i / (split - 1)
+          v = low + (high - low) * tUp
+        } else {
+          const tDown = (i - split) / Math.max(1, points - split - 1)
+          v = high + (last - high) * tDown
+        }
+        series.push(jitter(i, v))
+      }
+      return series
+    }
+
+    if (last > 0) {
+      const series = []
+      for (let i = 0; i < points; i += 1) {
+        series.push(jitter(i, last))
+      }
+      return series
+    }
+
+    return []
+  }
+
   const getDisplaySeries = (t) => {
     const history = priceHistory[t.pair] || []
-    if (history.length >= 2) return history
+    if (history.length >= 20) return history
     const low = Number(t.low || 0)
     const high = Number(t.high || 0)
     const last = Number(t.last || 0)
     if (low > 0 && high > 0) {
-      return [low, last || low, high].filter((v) => Number.isFinite(v))
+      return buildSyntheticSeries(t, 60)
     }
-    if (last > 0) return [last, last * 1.0001]
+    if (last > 0) return buildSyntheticSeries(t, 60)
     return []
+  }
+
+  const getDetailSeries = (t) => {
+    const history = priceHistory[t.pair] || []
+    if (history.length >= 40) return history
+    return buildSyntheticSeries(t, 120)
+  }
+
+  const formatIntervalLabel = (ms) => {
+    const totalSeconds = Math.round(ms / 1000)
+    if (totalSeconds >= 3600) {
+      const hours = Math.round(totalSeconds / 3600)
+      return `${hours}h`
+    }
+    if (totalSeconds >= 60) {
+      const minutes = Math.round(totalSeconds / 60)
+      return `${minutes}m`
+    }
+    return `${totalSeconds}s`
+  }
+
+  const getTradingViewSymbol = (pair) => {
+    const base = String(pair || '').split('_')[0]?.toUpperCase()
+    if (!base) return ''
+    return `COINBASE:${base}USD`
+  }
+
+  const getTradingViewInterval = (ms) => {
+    const minutes = Math.max(1, Math.round(ms / 60000))
+    return minutes
   }
 
   const watchlist = useMemo(() => {
@@ -237,6 +315,20 @@ function App() {
     if (!q) return list
     return list.filter((t) => t.pair.includes(q))
   }, [tickers, search])
+
+  useEffect(() => {
+    setPairsPage(1)
+  }, [search, pairsPerPage])
+
+  const totalPairsPages = Math.max(
+    1,
+    Math.ceil(filteredTable.length / pairsPerPage)
+  )
+  const safePairsPage = Math.min(pairsPage, totalPairsPages)
+  const pagedPairs = useMemo(() => {
+    const start = (safePairsPage - 1) * pairsPerPage
+    return filteredTable.slice(start, start + pairsPerPage)
+  }, [filteredTable, safePairsPage, pairsPerPage])
 
   const dailyLoss = (risk.modal * risk.dailyLossPct) / 100
   const riskPerPos = (risk.modal * risk.riskPerPosPct) / 100
@@ -380,6 +472,22 @@ function App() {
                   <span>Vol {formatNumber(t.vol / 1_000_000_000, 2)}B</span>
                   <span>Range {formatNumber(t.rangePct, 2)}%</span>
                 </div>
+                <p className="price strong">
+                  {formatIDR(t.last, t.last < 1 ? 6 : 0)}
+                </p>
+                {(() => {
+                  const series = priceHistory[t.pair] || []
+                  const prev = series.length > 1 ? series[series.length - 2] : null
+                  const change = prev ? t.last - prev : 0
+                  const changePct = prev ? (change / prev) * 100 : 0
+                  const isUp = change >= 0
+                  return (
+                    <div className={`price-change ${isUp ? 'up' : 'down'}`}>
+                      {prev ? `${change >= 0 ? '+' : ''}${formatIDR(change, 0)}` : '—'}{' '}
+                      {prev ? `(${changePct >= 0 ? '+' : ''}${formatNumber(changePct, 2)}%)` : ''}
+                    </div>
+                  )
+                })()}
                 <p className="muted tiny">
                   Likuiditas tinggi + volatilitas intraday untuk peluang cepat.
                 </p>
@@ -410,7 +518,8 @@ function App() {
               const base = t.pair.split('_')[0].toUpperCase()
               const quote = t.pair.split('_')[1]?.toUpperCase() || 'IDR'
               const isOpen = expandedPair === t.pair
-              const detailSeries = priceHistory[t.pair] || series
+              const tvSymbol = getTradingViewSymbol(t.pair)
+              const tvInterval = getTradingViewInterval(liveIntervalMs)
               return (
                 <div className="coin-row list" key={t.pair}>
                   <button
@@ -466,28 +575,33 @@ function App() {
                       </p>
                     </div>
                   </button>
-                  {isOpen && (
-                    <div className="coin-detail">
-                      <div className="coin-detail-head">
-                        <span className="muted tiny">
-                          Realtime chart ({Math.round(liveIntervalMs / 1000)}s)
-                        </span>
-                        <span className="muted tiny">Update {snapshot || '—'}</span>
+                    {isOpen && (
+                      <div className="coin-detail">
+                        <div className="coin-detail-head">
+                          <span className="muted tiny">
+                            Realtime chart ({formatIntervalLabel(liveIntervalMs)})
+                          </span>
+                          <span className="muted tiny">Update {snapshot || '—'}</span>
+                        </div>
+                        {tvSymbol ? (
+                          <div className="tv-embed">
+                            <iframe
+                              title={`${t.pair} TradingView`}
+                              src={`https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(
+                                tvSymbol
+                              )}&interval=${tvInterval}&theme=light&style=3&timezone=Asia%2FJakarta&withdateranges=1&hideideas=1&hidevolume=1&allow_symbol_change=0`}
+                              loading="lazy"
+                              frameBorder="0"
+                              allow="fullscreen"
+                            />
+                          </div>
+                        ) : (
+                          <div className="tv-fallback muted tiny">
+                            TradingView chart tidak tersedia untuk pair ini.
+                          </div>
+                        )}
                       </div>
-                      <svg
-                        className="sparkline large"
-                        viewBox="0 0 320 96"
-                        preserveAspectRatio="none"
-                      >
-                        <polyline
-                          points={sparklinePoints(detailSeries, 320, 96, 6)}
-                          className={sparkClass}
-                          stroke={sparkClass === 'down' ? '#ef4444' : sparkClass === 'up' ? '#16a34a' : 'rgba(15, 23, 42, 0.45)'}
-                          fill="none"
-                        />
-                      </svg>
-                    </div>
-                  )}
+                    )}
                 </div>
               )
             })
@@ -613,9 +727,73 @@ function App() {
             />
             <span>{filteredTable.length} pair</span>
           </div>
+          <div className="pager-controls">
+            <label>
+              Per halaman
+              <select
+                value={pairsPerPage}
+                onChange={(e) => setPairsPerPage(Number(e.target.value))}
+              >
+                <option value={6}>6</option>
+                <option value={12}>12</option>
+                <option value={18}>18</option>
+                <option value={24}>24</option>
+              </select>
+            </label>
+            <div className="pager">
+              <button
+                type="button"
+                onClick={() => setPairsPage(1)}
+                disabled={safePairsPage <= 1}
+              >
+                First
+              </button>
+              <button
+                type="button"
+                onClick={() => setPairsPage((p) => Math.max(1, p - 1))}
+                disabled={safePairsPage <= 1}
+              >
+                Prev
+              </button>
+              <span className="muted tiny">
+                {safePairsPage} / {totalPairsPages}
+              </span>
+              <label className="pager-jump">
+                <span className="muted tiny">Jump</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={totalPairsPages}
+                  value={safePairsPage}
+                  onChange={(e) => {
+                    const raw = Number(e.target.value || 1)
+                    const next = Math.min(
+                      totalPairsPages,
+                      Math.max(1, raw)
+                    )
+                    setPairsPage(next)
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => setPairsPage((p) => Math.min(totalPairsPages, p + 1))}
+                disabled={safePairsPage >= totalPairsPages}
+              >
+                Next
+              </button>
+              <button
+                type="button"
+                onClick={() => setPairsPage(totalPairsPages)}
+                disabled={safePairsPage >= totalPairsPages}
+              >
+                Last
+              </button>
+            </div>
+          </div>
           <div className="coin-stream cards">
-            {filteredTable.length > 0 ? (
-              filteredTable.map((t) => {
+            {pagedPairs.length > 0 ? (
+              pagedPairs.map((t) => {
                 const history = priceHistory[t.pair] || []
                 const series = getDisplaySeries(t)
                 const prev = history.length > 1 ? history[history.length - 2] : null
@@ -626,7 +804,8 @@ function App() {
                 const base = t.pair.split('_')[0].toUpperCase()
                 const quote = t.pair.split('_')[1]?.toUpperCase() || 'IDR'
                 const isOpen = expandedPair === t.pair
-                const detailSeries = priceHistory[t.pair] || series
+                const tvSymbol = getTradingViewSymbol(t.pair)
+                const tvInterval = getTradingViewInterval(liveIntervalMs)
                 return (
                   <div
                     key={t.pair}
@@ -687,22 +866,30 @@ function App() {
                     {isOpen && (
                       <div className="coin-detail">
                         <div className="coin-detail-head">
-                          <span className="muted tiny">Realtime chart (30s)</span>
+                          <span className="muted tiny">
+                            Realtime chart ({formatIntervalLabel(liveIntervalMs)})
+                          </span>
                           <span className="muted tiny">
                             Update {snapshot || '—'}
                           </span>
                         </div>
-                        <svg
-                          className="sparkline large"
-                          viewBox="0 0 320 96"
-                          preserveAspectRatio="none"
-                        >
-                          <polyline
-                            points={sparklinePoints(detailSeries, 320, 96, 6)}
-                            className={sparkClass}
-                            fill="none"
-                          />
-                        </svg>
+                        {tvSymbol ? (
+                          <div className="tv-embed">
+                            <iframe
+                              title={`${t.pair} TradingView`}
+                              src={`https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(
+                                tvSymbol
+                              )}&interval=${tvInterval}&theme=light&style=3&timezone=Asia%2FJakarta&withdateranges=1&hideideas=1&hidevolume=1&allow_symbol_change=0`}
+                              loading="lazy"
+                              frameBorder="0"
+                              allow="fullscreen"
+                            />
+                          </div>
+                        ) : (
+                          <div className="tv-fallback muted tiny">
+                            TradingView chart tidak tersedia untuk pair ini.
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
