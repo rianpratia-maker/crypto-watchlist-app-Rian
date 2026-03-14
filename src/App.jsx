@@ -341,10 +341,12 @@ function App() {
 
   const recommended = useMemo(() => {
     const majors = ['btc_idr', 'eth_idr', 'sol_idr', 'bnb_idr']
-    const byPair = new Map(watchlist.map((t) => [t.pair, t]))
-    const result = majors.map((pair) => byPair.get(pair)).filter(Boolean)
+    const byPair = new Map(tickers.map((t) => [t.pair, t]))
+    const result = majors
+      .map((pair) => byPair.get(pair))
+      .filter((t) => t && !STABLE_PAIRS.has(t.pair))
     return result.length > 0 ? result : watchlist.slice(0, 5)
-  }, [watchlist])
+  }, [tickers, watchlist])
   const watchlistPairs = useMemo(
     () => new Set(watchlist.map((t) => t.pair)),
     [watchlist]
