@@ -1,0 +1,60 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+:root {
+  --bg: #0c1017;
+  --bg-soft: #101826;
+  --card: #121a26;
+  --header: #0f1622;
+  --field: #0f1724;
+  --border: rgba(255, 255, 255, 0.08);
+  --text: #c9d2df;
+  --text-strong: #f2f6fb;
+  --muted: #8b97ab;
+  --accent: #ff6f4a;
+  --danger: #ff5d5d;
+  --shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+  --shadow-soft: 0 12px 24px rgba(0, 0, 0, 0.2);
+
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(255, 111, 74, 0.12), transparent 60%),
+    radial-gradient(900px 500px at 110% 10%, rgba(42, 147, 255, 0.15), transparent 55%),
+    linear-gradient(180deg, #0b0f16 0%, #0c1017 100%);
+}
+
+#root {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+h1, h2 {
+  font-family: 'Fraunces', serif;
+  color: var(--text-strong);
+  margin: 0;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+button, input {
+  font-family: inherit;
+}
