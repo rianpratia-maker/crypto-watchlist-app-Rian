@@ -339,7 +339,12 @@ function App() {
       .slice(0, 10)
   }, [tickers])
 
-  const recommended = useMemo(() => watchlist.slice(0, 5), [watchlist])
+  const recommended = useMemo(() => {
+    const majors = ['btc_idr', 'eth_idr', 'sol_idr', 'bnb_idr']
+    const byPair = new Map(watchlist.map((t) => [t.pair, t]))
+    const result = majors.map((pair) => byPair.get(pair)).filter(Boolean)
+    return result.length > 0 ? result : watchlist.slice(0, 5)
+  }, [watchlist])
   const watchlistPairs = useMemo(
     () => new Set(watchlist.map((t) => t.pair)),
     [watchlist]
