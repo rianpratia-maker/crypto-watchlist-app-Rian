@@ -124,6 +124,17 @@
   gap: 16px;
 }
 
+.section-head.compact {
+  margin: 12px 0 6px;
+}
+
+.split-recos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+}
+
 .section-head p {
   color: var(--muted);
 }
@@ -144,6 +155,11 @@
   display: grid;
   gap: 10px;
   box-shadow: var(--shadow-soft);
+}
+
+.recommend-card.mini {
+  padding: 12px 14px;
+  gap: 8px;
 }
 
 .recommend-card .value {
@@ -767,6 +783,10 @@ input {
   }
 
   .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .split-recos {
     grid-template-columns: 1fr;
   }
 

@@ -10,6 +10,55 @@ const STABLE_PAIRS = new Set([
   'xaut_idr'
 ])
 
+const MEME_BASES = new Set([
+  'DOGE',
+  'SHIB',
+  'PEPE',
+  'FLOKI',
+  'BONK',
+  'WIF',
+  'MEME',
+  'BRETT',
+  'MOG',
+  'TURBO',
+  'BABYDOGE',
+  'LADYS',
+  'KUNCI',
+  'TKO'
+])
+
+const TV_BASES = new Set([
+  'BTC',
+  'ETH',
+  'BNB',
+  'SOL',
+  'XRP',
+  'ADA',
+  'DOGE',
+  'TRX',
+  'DOT',
+  'AVAX',
+  'LINK',
+  'MATIC',
+  'LTC',
+  'BCH',
+  'SHIB',
+  'TON',
+  'UNI',
+  'AAVE',
+  'ATOM',
+  'FIL',
+  'NEAR',
+  'ETC',
+  'XLM',
+  'XMR',
+  'HBAR',
+  'ICP',
+  'RNDR',
+  'OP',
+  'ARB'
+])
+
 const DEFAULT_RISK = {
   modal: 10_000_000,
   dailyLossPct: 2,
@@ -269,7 +318,7 @@ function App() {
 
   const getTradingViewSymbol = (pair) => {
     const base = String(pair || '').split('_')[0]?.toUpperCase()
-    if (!base) return ''
+    if (!base || !TV_BASES.has(base)) return ''
     return `BINANCE:${base}USDT`
   }
 
@@ -299,6 +348,20 @@ function App() {
     () => new Set(watchlist.map((t) => t.pair.split('_')[0])),
     [watchlist]
   )
+
+  const altRecommendations = useMemo(() => {
+    return watchlist.filter((t) => {
+      const base = t.pair.split('_')[0].toUpperCase()
+      return !MEME_BASES.has(base)
+    })
+  }, [watchlist])
+
+  const memeRecommendations = useMemo(() => {
+    return watchlist.filter((t) => {
+      const base = t.pair.split('_')[0].toUpperCase()
+      return MEME_BASES.has(base)
+    })
+  }, [watchlist])
 
   const newsCoins = useMemo(() => {
     if (showAllNewsCoins) return topCoins
@@ -505,6 +568,62 @@ function App() {
             </div>
           )}
         </div>
+        <div className="split-recos">
+          <div>
+            <div className="section-head compact">
+              <h3>Rekomendasi Alt Coin</h3>
+              <p>Top alt berdasarkan skor saat ini.</p>
+            </div>
+            <div className="recommendations">
+              {(altRecommendations.length > 0 ? altRecommendations.slice(0, 5) : []).map(
+                (t) => (
+                  <div className="recommend-card mini" key={`alt-${t.pair}`}>
+                    <p className="value">{t.pair}</p>
+                    <p className="price strong">
+                      {formatIDR(t.last, t.last < 1 ? 6 : 0)}
+                    </p>
+                    <div className="reason">
+                      <span>Vol {formatNumber(t.vol / 1_000_000_000, 2)}B</span>
+                      <span>Range {formatNumber(t.rangePct, 2)}%</span>
+                    </div>
+                  </div>
+                )
+              )}
+              {altRecommendations.length === 0 && (
+                <div className="recommend-card mini">
+                  <p className="muted tiny">Belum ada alt coin terdeteksi.</p>
+                </div>
+              )}
+            </div>
+          </div>
+          <div>
+            <div className="section-head compact">
+              <h3>Rekomendasi Meme Coin</h3>
+              <p>Top meme coin berdasarkan skor saat ini.</p>
+            </div>
+            <div className="recommendations">
+              {(memeRecommendations.length > 0 ? memeRecommendations.slice(0, 5) : []).map(
+                (t) => (
+                  <div className="recommend-card mini" key={`meme-${t.pair}`}>
+                    <p className="value">{t.pair}</p>
+                    <p className="price strong">
+                      {formatIDR(t.last, t.last < 1 ? 6 : 0)}
+                    </p>
+                    <div className="reason">
+                      <span>Vol {formatNumber(t.vol / 1_000_000_000, 2)}B</span>
+                      <span>Range {formatNumber(t.rangePct, 2)}%</span>
+                    </div>
+                  </div>
+                )
+              )}
+              {memeRecommendations.length === 0 && (
+                <div className="recommend-card mini">
+                  <p className="muted tiny">Belum ada meme coin terdeteksi.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
         <div className="coin-stream list">
           {watchlist.length > 0 ? (
             watchlist.map((t) => {
@@ -520,6 +639,7 @@ function App() {
               const isOpen = expandedPair === t.pair
               const tvSymbol = getTradingViewSymbol(t.pair)
               const tvInterval = getTradingViewInterval(liveIntervalMs)
+              const detailSeries = getDetailSeries(t)
               return (
                 <div className="coin-row list" key={t.pair}>
                   <button
@@ -596,8 +716,29 @@ function App() {
                             />
                           </div>
                         ) : (
-                          <div className="tv-fallback muted tiny">
-                            TradingView chart tidak tersedia untuk pair ini.
+                          <div className="tv-fallback">
+                            <p className="muted tiny">
+                              TradingView tidak tersedia untuk koin ini. Menampilkan
+                              sparkline lokal.
+                            </p>
+                            <svg
+                              className="sparkline large"
+                              viewBox="0 0 320 96"
+                              preserveAspectRatio="none"
+                            >
+                              <polyline
+                                points={sparklinePoints(detailSeries, 320, 96, 6)}
+                                className={sparkClass}
+                                stroke={
+                                  sparkClass === 'down'
+                                    ? '#ef4444'
+                                    : sparkClass === 'up'
+                                      ? '#16a34a'
+                                      : 'rgba(15, 23, 42, 0.45)'
+                                }
+                                fill="none"
+                              />
+                            </svg>
                           </div>
                         )}
                       </div>
@@ -806,6 +947,7 @@ function App() {
                 const isOpen = expandedPair === t.pair
                 const tvSymbol = getTradingViewSymbol(t.pair)
                 const tvInterval = getTradingViewInterval(liveIntervalMs)
+                const detailSeries = getDetailSeries(t)
                 return (
                   <div
                     key={t.pair}
@@ -886,8 +1028,29 @@ function App() {
                             />
                           </div>
                         ) : (
-                          <div className="tv-fallback muted tiny">
-                            TradingView chart tidak tersedia untuk pair ini.
+                          <div className="tv-fallback">
+                            <p className="muted tiny">
+                              TradingView tidak tersedia untuk koin ini. Menampilkan
+                              sparkline lokal.
+                            </p>
+                            <svg
+                              className="sparkline large"
+                              viewBox="0 0 320 96"
+                              preserveAspectRatio="none"
+                            >
+                              <polyline
+                                points={sparklinePoints(detailSeries, 320, 96, 6)}
+                                className={sparkClass}
+                                stroke={
+                                  sparkClass === 'down'
+                                    ? '#ef4444'
+                                    : sparkClass === 'up'
+                                      ? '#16a34a'
+                                      : 'rgba(15, 23, 42, 0.45)'
+                                }
+                                fill="none"
+                              />
+                            </svg>
                           </div>
                         )}
                       </div>
