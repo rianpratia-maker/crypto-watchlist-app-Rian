@@ -179,6 +179,40 @@
   margin: 0;
 }
 
+.top-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.strength {
+  display: grid;
+  gap: 6px;
+}
+
+.strength-bar {
+  height: 6px;
+  background: rgba(15, 23, 42, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.strength-bar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #16a34a, #22c55e);
+}
+
+.pos-size {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.strong-text {
+  font-weight: 700;
+}
+
 .price-change {
   font-size: 14px;
   font-weight: 600;

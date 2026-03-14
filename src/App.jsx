@@ -240,6 +240,23 @@ function App() {
       .join(' ')
   }
 
+  const getBuyStrength = (t) => {
+    const volumeScore = Math.log10(t.vol + 1)
+    const rangeScore = t.rangePct / 5
+    const raw = volumeScore + rangeScore
+    const normalized = Math.min(100, Math.max(0, (raw / 8) * 100))
+    return Math.round(normalized)
+  }
+
+  const getPositionPct = (t) => {
+    const base = t.pair.split('_')[0].toUpperCase()
+    const isMajor = ['BTC', 'ETH', 'SOL', 'BNB'].includes(base)
+    const stopPct = isMajor ? risk.stopMajorPct : risk.stopAltPct
+    if (!stopPct || !risk.modal) return 0
+    const posSize = riskPerPos / (stopPct / 100)
+    return Math.round((posSize / risk.modal) * 1000) / 10
+  }
+
   const hashSeed = (text) => {
     let hash = 0
     for (let i = 0; i < text.length; i += 1) {
@@ -542,6 +559,21 @@ function App() {
                   <span>Vol {formatNumber(t.vol / 1_000_000_000, 2)}B</span>
                   <span>Range {formatNumber(t.rangePct, 2)}%</span>
                 </div>
+                <div className="top-metrics">
+                  <div className="strength">
+                    <span className="muted tiny">Buy strength</span>
+                    <div className="strength-bar">
+                      <span style={{ width: `${getBuyStrength(t)}%` }} />
+                    </div>
+                    <span className="tiny strong-text">{getBuyStrength(t)}%</span>
+                  </div>
+                  <div className="pos-size">
+                    <span className="muted tiny">Size (%)</span>
+                    <span className="strong-text">
+                      {getPositionPct(t)}% modal
+                    </span>
+                  </div>
+                </div>
                 <p className="price strong">
                   {formatIDR(t.last, t.last < 1 ? 6 : 0)}
                 </p>
@@ -559,7 +591,7 @@ function App() {
                   )
                 })()}
                 <p className="muted tiny">
-                  Likuiditas tinggi + volatilitas intraday untuk peluang cepat.
+                  Indikator ini bukan saran finansial.
                 </p>
               </div>
             ))
